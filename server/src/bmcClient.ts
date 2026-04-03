@@ -20,8 +20,13 @@ const client = axios.create({
 
 let csrfToken: string | null = null;
 let sessionCookies: string = '';
+let lockoutUntil: number = 0;
 
 export const authenticate = async () => {
+  if (Date.now() < lockoutUntil) {
+     throw new Error(`BMC is locked. Cooling down for ${Math.ceil((lockoutUntil - Date.now())/1000)} seconds.`);
+  }
+
   if (csrfToken && sessionCookies) return { csrfToken, sessionCookies };
 
   if (!BMC_USER || !BMC_PASS) {
@@ -43,7 +48,30 @@ export const authenticate = async () => {
     }
   } catch (error: any) {
     console.error("Authentication failed:", error.response?.status || error.message);
+    lockoutUntil = Date.now() + 15000; // 15 second cooldown before allowing another login attempt!
     throw new Error("BMC Authentication Failed");
+  }
+}
+
+export const logOutSafely = async () => {
+  if (!csrfToken || !sessionCookies) return;
+  try {
+      await client.delete('api/session', {
+          headers: { 'X-CSRFTOKEN': csrfToken, 'Cookie': sessionCookies }
+      });
+      csrfToken = null;
+      sessionCookies = '';
+  } catch (err) {
+      // Fallback
+      try {
+          await client.post('api/session/logout', {}, {
+              headers: { 'X-CSRFTOKEN': csrfToken!, 'Cookie': sessionCookies }
+           });
+          csrfToken = null;
+          sessionCookies = '';
+      } catch (e) {
+          // ignore
+      }
   }
 }
 
@@ -69,7 +97,7 @@ export const getSensors = async () => {
   }
 }
 
-export const applyMasterCurve = async (curve: any, customUrl?: string) => {
+export const applyZoneCurve = async (zoneId: number, curve: any, customUrl?: string) => {
   const { csrfToken: token, sessionCookies: cookie } = await authenticate();
   
   // Format the array: ["tempA","dutyA","tempB","dutyB","tempC","dutyC","tempD","dutyD", 100, 100]
@@ -86,36 +114,49 @@ export const applyMasterCurve = async (curve: any, customUrl?: string) => {
   ];
 
   let successEndpoint = null;
+  const payload = {
+      PWMIndex: zoneId,
+      PWMSrc: 0,
+      CurrentPWMdata
+  };
 
-  for (let i = 0; i <= 6; i++) {
-    const payload = {
-       PWMIndex: i,
-       PWMSrc: 0,
-       CurrentPWMdata
-    };
-
-    let savedZone = false;
-    for (const ep of possibleEndpoints) {
-      try {
-        const res = await client.put(ep, payload, {
-          headers: {
-            'X-CSRFTOKEN': token,
-            'Cookie': cookie,
-             'Content-Type': 'application/json'
-          }
-        });
-        if (res.status === 200 || res.status === 204) {
-           successEndpoint = ep; // found the right endpoint
-           savedZone = true;
-           break;
+  let savedZone = false;
+  for (const ep of possibleEndpoints) {
+    try {
+      const res = await client.put(ep, payload, {
+        headers: {
+          'X-CSRFTOKEN': token,
+          'Cookie': cookie,
+            'Content-Type': 'application/json'
         }
-      } catch (e: any) {
-        // likely 404, we will try the next endpoint
+      });
+      if (res.status === 200 || res.status === 204) {
+          successEndpoint = ep; 
+          savedZone = true;
+          break;
       }
+    } catch (e: any) {
+      // Ignore and try next endpoint
     }
-    
-    if (!savedZone) {
-       console.error(`Zone ${i} failed to save on all guessed endpoints.`);
+  }
+  
+  if (!savedZone) {
+      console.error(`Zone ${zoneId} failed to save on all guessed endpoints.`);
+      throw new Error(`Failed to save curve for zone ${zoneId}`);
+  }
+
+  return { success: true, endpointUsed: successEndpoint, zoneId };
+}
+
+export const applyMasterCurve = async (curve: any, customUrl?: string) => {
+  let successEndpoint = null;
+  // Apply the same curve to all 7 zones
+  for (let i = 0; i <= 6; i++) {
+    try {
+      const result = await applyZoneCurve(i, curve, customUrl);
+      if (result.endpointUsed) successEndpoint = result.endpointUsed;
+    } catch (e: any) {
+      console.error(`Failed to apply master curve to zone ${i}`, e);
     }
   }
 

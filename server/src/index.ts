@@ -1,8 +1,19 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
-import { getSensors, applyMasterCurve } from './bmcClient.js';
+import websocket from '@fastify/websocket';
+import { getSensors, applyMasterCurve, applyZoneCurve, logOutSafely } from './bmcClient.js';
 import { getOsMetrics } from './osMetrics.js';
+
+['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(signal => {
+  process.on(signal as NodeJS.Signals, async () => {
+    console.log(`Received ${signal}, cleaning up BMC sessions...`);
+    try {
+        await logOutSafely();
+    } catch(e){}
+    process.exit(0);
+  });
+});
 
 dotenv.config();
 
@@ -11,6 +22,8 @@ const server = fastify({ logger: true });
 server.register(cors, {
   origin: '*'
 });
+
+server.register(websocket);
 
 server.get('/api/sensors', async (request, reply) => {
   try {
@@ -23,10 +36,59 @@ server.get('/api/sensors', async (request, reply) => {
   }
 });
 
+// Broadcast state to all connected socket clients every 2 seconds
+let sensorPollInterval: NodeJS.Timeout | null = null;
+const broadcastSensors = async () => {
+    if (!server.websocketServer) return;
+    const clients = server.websocketServer.clients;
+    if (clients.size === 0) return; // don't poll if no one is listening
+
+    try {
+        const data = await getSensors();
+        const osMetrics = await getOsMetrics();
+        const payload = JSON.stringify({ bmc: data, os: osMetrics });
+        for (const client of clients) {
+            if (client.readyState === 1) {
+                client.send(payload);
+            }
+        }
+    } catch (e) {
+        console.error("Socket broadcast poll failed:", e);
+    }
+};
+
+server.register(async function (fastify) {
+  fastify.get('/api/ws/sensors', { websocket: true }, (socket, req) => {
+      // Start polling if not started
+      if (!sensorPollInterval) {
+          sensorPollInterval = setInterval(broadcastSensors, 10000);
+      }
+      
+      socket.on('close', () => {
+          if (server.websocketServer?.clients.size === 0 && sensorPollInterval) {
+              clearInterval(sensorPollInterval);
+              sensorPollInterval = null;
+          }
+      });
+  });
+});
+
 server.post('/api/fans/apply-curve', async (request, reply) => {
   try {
     const body: any = request.body;
     const result = await applyMasterCurve(body.curve, body.url);
+    return result;
+  } catch (err: any) {
+    server.log.error(err);
+    reply.status(500).send({ error: err.message });
+  }
+});
+
+server.post('/api/fans/apply-zone-curve', async (request, reply) => {
+  try {
+    const body: any = request.body;
+    if (body.zoneId === undefined) throw new Error("zoneId is required");
+    const result = await applyZoneCurve(body.zoneId, body.curve, body.url);
     return result;
   } catch (err: any) {
     server.log.error(err);

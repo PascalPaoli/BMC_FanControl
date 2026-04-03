@@ -6,6 +6,7 @@ import { Save } from 'lucide-react';
 import FanCurveEditor from './FanCurveEditor';
 import TimeSeriesChart from './TimeSeriesChart';
 import WeAiBlock from './WeAiBlock';
+import MotherboardMap from './components/MotherboardMap';
 
 type Sensor = {
   id: number;
@@ -90,18 +91,17 @@ function App() {
   }, [blockOrder, collapsedBlocks]);
 
   useEffect(() => {
-    const fetchSensors = async () => {
+    const ws = new WebSocket('ws://localhost:3001/api/ws/sensors');
+    
+    ws.onmessage = (event) => {
       try {
-        const res = await fetch('http://localhost:3001/api/sensors');
-        const data = await res.json();
-        
-        const bmcData = data.bmc || data; // Fallback if API returns flat array
+        const data = JSON.parse(event.data);
+        const bmcData = data.bmc || data; 
         const osData = data.os || { cpu: 0, gpu: 0 };
         
         setSensors(bmcData);
         setOsMetrics(osData);
 
-        // Collect history for active temperatures only
         const t = new Date().toLocaleTimeString('en-US', {hour12: false, hour: "numeric", minute: "numeric", second: "numeric"});
         const tempEntry: any = { time: t };
         
@@ -116,27 +116,33 @@ function App() {
           if (next.length > 60) next.shift(); 
           return next;
         });
+        setError('');
       } catch (err: any) {
-        setError(err.message);
+        console.error(err);
       }
     };
-    
-    fetchSensors();
-    const interval = setInterval(fetchSensors, 5000);
-    return () => clearInterval(interval);
+
+    ws.onerror = () => {
+       setError("WebSocket connection failed.");
+    };
+
+    return () => {
+       ws.close();
+    };
   }, []);
 
   const temperatures = sensors.filter(s => s.type === 'temperature' && s.reading > 0);
   const fans = sensors.filter(s => s.type === 'fan' && s.reading > 0);
 
-  // FIXED 5 TIER PRESETS
+  // FIXED 6 TIER PRESETS
   type PresetSlot = { id: string; label: string; defaultCurve: ZoneCurve };
   const PRESET_SLOTS: PresetSlot[] = [
-    { id: 'keep-calm', label: 'Keep Calm', defaultCurve: { a: {temp: 0, duty: 10}, b: {temp: 50, duty: 20}, c: {temp: 70, duty: 40}, d: {temp: 100, duty: 100} } },
-    { id: 'calm', label: 'Calm', defaultCurve: { a: {temp: 0, duty: 20}, b: {temp: 50, duty: 30}, c: {temp: 75, duty: 40}, d: {temp: 100, duty: 100} } },
-    { id: 'normal', label: 'Normal', defaultCurve: { a: {temp: 0, duty: 20}, b: {temp: 50, duty: 40}, c: {temp: 85, duty: 95}, d: {temp: 100, duty: 100} } },
-    { id: 'hot', label: 'Hot', defaultCurve: { a: {temp: 0, duty: 30}, b: {temp: 40, duty: 50}, c: {temp: 65, duty: 100}, d: {temp: 100, duty: 100} } },
-    { id: 'too-hot', label: 'Too Hot', defaultCurve: { a: {temp: 0, duty: 50}, b: {temp: 35, duty: 80}, c: {temp: 60, duty: 100}, d: {temp: 100, duty: 100} } }
+    { id: '1', label: 'Keep Calm', defaultCurve: { a: {temp: 0, duty: 25}, b: {temp: 50, duty: 40}, c: {temp: 85, duty: 95}, d: {temp: 100, duty: 100} } },
+    { id: '2', label: 'Calm', defaultCurve: { a: {temp: 0, duty: 25}, b: {temp: 40, duty: 40}, c: {temp: 75, duty: 90}, d: {temp: 100, duty: 100} } },
+    { id: '3', label: 'Normal', defaultCurve: { a: {temp: 0, duty: 30}, b: {temp: 45, duty: 50}, c: {temp: 80, duty: 100}, d: {temp: 100, duty: 100} } },
+    { id: '4', label: 'Hot', defaultCurve: { a: {temp: 0, duty: 40}, b: {temp: 35, duty: 60}, c: {temp: 70, duty: 100}, d: {temp: 100, duty: 100} } },
+    { id: '5', label: 'Too Hot', defaultCurve: { a: {temp: 0, duty: 50}, b: {temp: 30, duty: 75}, c: {temp: 60, duty: 100}, d: {temp: 100, duty: 100} } },
+    { id: '6', label: 'Extreme', defaultCurve: { a: {temp: 0, duty: 60}, b: {temp: 30, duty: 85}, c: {temp: 50, duty: 100}, d: {temp: 100, duty: 100} } }
   ];
 
   const [savedSlots, setSavedSlots] = useState<Record<string, ZoneCurve>>({});
@@ -151,25 +157,36 @@ function App() {
     }
   }, []);
 
-  const [masterCurve, setMasterCurve] = useState<ZoneCurve>(PRESET_SLOTS[2].defaultCurve);
+  const [activeZoneIds, setActiveZoneIds] = useState<number[]>([]);
+  const activeCurveKey = activeZoneIds.length === 0 ? 'all' : [...activeZoneIds].sort().join(',');
+  const [zoneCurves, setZoneCurves] = useState<Record<string, ZoneCurve>>({ 'all': PRESET_SLOTS[2].defaultCurve });
+  const activeCurve = zoneCurves[activeCurveKey] || PRESET_SLOTS[2].defaultCurve;
+
   const [isSaving, setIsSaving] = useState(false);
 
   const handlePointChange = (point: 'a'|'b'|'c'|'d', field: 'temp'|'duty', value: number) => {
     setActiveSlotId(''); 
-    setMasterCurve(prev => ({
-      ...prev,
-      [point]: { ...prev[point], [field]: value }
-    }));
+    setZoneCurves(prev => {
+        const current = prev[activeCurveKey] || PRESET_SLOTS[2].defaultCurve;
+        return {
+           ...prev,
+           [activeCurveKey]: {
+              ...current,
+              [point]: { ...current[point], [field]: value }
+           }
+        };
+    });
   };
 
   const handleApplySlot = (id: string) => {
     setActiveSlotId(id);
-    setMasterCurve(savedSlots[id] || PRESET_SLOTS.find(s => s.id === id)?.defaultCurve || PRESET_SLOTS[2].defaultCurve);
+    const targetCurve = savedSlots[id] || PRESET_SLOTS.find(s => s.id === id)?.defaultCurve || PRESET_SLOTS[2].defaultCurve;
+    setZoneCurves(prev => ({ ...prev, [activeCurveKey]: targetCurve }));
   };
 
   const handleSaveToSlot = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = { ...savedSlots, [id]: masterCurve };
+    const updated = { ...savedSlots, [id]: activeCurve };
     setSavedSlots(updated);
     setActiveSlotId(id);
     localStorage.setItem('bmc_fan_slots', JSON.stringify(updated));
@@ -178,14 +195,27 @@ function App() {
   const handleApplyToAll = async (forceCurve?: ZoneCurve) => {
      setIsSaving(true);
      setError('');
+     const curveToApply = forceCurve || activeCurve;
      try {
-       const res = await fetch('http://localhost:3001/api/fans/apply-curve', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ curve: forceCurve || masterCurve })
-       });
-       const data = await res.json();
-       if (data.error) throw new Error(data.error);
+       if (activeZoneIds.length === 0) {
+           const res = await fetch('http://localhost:3001/api/fans/apply-curve', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ curve: curveToApply })
+           });
+           const data = await res.json();
+           if (data.error) throw new Error(data.error);
+       } else {
+           await Promise.all(activeZoneIds.map(async zoneId => {
+               const res = await fetch('http://localhost:3001/api/fans/apply-zone-curve', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ zoneId, curve: curveToApply })
+               });
+               const data = await res.json();
+               if (data.error) throw new Error(data.error);
+           }));
+       }
      } catch (err: any) {
        setError(err.message);
      } finally {
@@ -338,62 +368,97 @@ function App() {
       return (
         <WeAiBlock key={id} id={id} title={
            <div className="flex items-center justify-between w-full">
-               <span>Global Watercooling Curve</span>
+               <span>Granular Fan Curve Configuration</span>
                <span className="px-3 py-1 bg-bmcaccent/20 text-bmcaccent text-xs font-bold rounded-full border border-bmcaccent/30 flex items-center gap-1.5 shadow-[0_0_15px_rgba(20,184,166,0.2)] ml-4">
                  <span className="w-1.5 h-1.5 rounded-full bg-bmcaccent animate-pulse"></span>
-                 SYNCED
+                 {activeZoneIds.length === 0 ? 'SYNCED' : `ZONES: ${activeZoneIds.join(', ')}`}
                </span>
            </div>
         } isCollapsed={isCollapsed} onToggleCollapse={toggleCollapse}>
            
-           <div className="flex flex-col xl:flex-row gap-6 items-stretch">
-             {/* Left Panel: 5 States */}
-             <div className="w-full xl:w-64 flex flex-col gap-3 justify-center">
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 text-center">Curve States</div>
-                {PRESET_SLOTS.map(slot => (
-                  <div 
-                    key={slot.id} 
-                    onDoubleClick={() => {
-                        handleApplySlot(slot.id);
-                        const targetCurve = savedSlots[slot.id] || PRESET_SLOTS.find(s => s.id === slot.id)?.defaultCurve || PRESET_SLOTS[2].defaultCurve;
-                        handleApplyToAll(targetCurve);
-                    }}
-                    title="Double click to apply instantly!"
-                    className={`flex items-center rounded-xl overflow-hidden shadow-md border transition-all cursor-pointer select-none ${activeSlotId === slot.id ? 'bg-bmcaccent/10 border-bmcaccent/50' : 'bg-bmcdark-900 border-white/5 hover:border-white/20'}`}
-                  >
-                     <button 
-                       onClick={() => handleApplySlot(slot.id)}
-                       className={`flex-1 p-4 text-left font-bold transition-colors ${activeSlotId === slot.id ? 'text-bmcaccent' : 'text-slate-300 hover:text-white'}`}
-                     >
-                       {slot.label} {savedSlots[slot.id] && <span className="text-[10px] ml-1 opacity-70 border border-current px-1 rounded-sm">SAVED</span>}
-                     </button>
-                     <button 
-                       onClick={(e) => handleSaveToSlot(slot.id, e)}
-                       title={`Save current curve to ${slot.label}`}
-                       className="p-4 bg-bmcdark-800 text-slate-500 hover:bg-emerald-500 hover:text-white transition-colors border-l border-white/5"
-                     >
-                       <Save size={18} />
-                     </button>
-                  </div>
-                ))}
-                
-                <button 
-                   onClick={() => handleApplyToAll()}
-                   disabled={isSaving}
-                   className={`w-full mt-4 border transition-all rounded-xl py-4 font-bold uppercase tracking-widest shadow-lg
-                      ${isSaving 
-                        ? 'bg-bmcdark-700 text-slate-400 border-bmcdark-700 cursor-wait' 
-                        : 'bg-bmcaccent/10 text-bmcaccent border-bmcaccent/30 hover:bg-bmcaccent hover:text-white hover:shadow-[0_0_20px_rgba(20,184,166,0.3)] hover:scale-[1.01] active:scale-[0.99]'
-                      }`}
-                >
-                  {isSaving ? 'Syncing...' : '⚡ Apply to 7 Zones'}
-                </button>
+           <div className="grid grid-cols-1 2xl:grid-cols-[1.5fr_1fr] gap-6 w-full items-stretch bg-bmcdark-900/20 rounded-2xl p-4 border border-white/5">
+             
+             {/* LEFT COLUMN: Motherboard Map */}
+             <div className="w-full flex justify-center items-center relative h-full">
+                <div className="w-full aspect-square relative">
+                   <MotherboardMap 
+                  activeZoneIds={activeZoneIds} 
+                  onSelectZone={(id, isCtrl) => {
+                      if (id === 'all') {
+                          setActiveZoneIds([]);
+                      } else {
+                          setActiveZoneIds(prev => {
+                              if (isCtrl) {
+                                  if (prev.includes(id as number)) return prev.filter((z: number) => z !== id);
+                                  return [...prev, id as number];
+                              }
+                              return [id as number];
+                          });
+                      }
+                  }}
+                  fanSpeeds={fans.reduce((acc, sensor) => { acc[sensor.name] = sensor.reading; return acc; }, {} as Record<string, number>)}
+                  thermals={temperatures.reduce((acc, sensor) => { acc[sensor.name] = sensor.reading; return acc; }, {} as Record<string, number>)}
+                />
+                </div>
              </div>
 
-             {/* Right side: Interactive SVG Graph */}
-             <div className="flex-1 flex justify-center items-center w-full min-h-[400px]">
-               <FanCurveEditor curve={masterCurve} onChange={handlePointChange} />
+             {/* RIGHT COLUMN: Stacked Graph and Presets */}
+             <div className="flex flex-col gap-4 w-full h-full">
+               
+               {/* Right Top: Interactive SVG Graph */}
+               <div className="bg-bmcdark-900/60 rounded-2xl border border-white/5 p-4 shadow-inner flex flex-col justify-center items-center w-full flex-1">
+                 <div className="w-full text-center text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Interactive Curve Map</div>
+                 <div className="flex-1 w-full flex justify-center items-center min-h-0">
+                   <FanCurveEditor curve={activeCurve} onChange={handlePointChange} />
+                 </div>
+               </div>
+
+               {/* Right Bottom: 5 States & Apply Button */}
+               <div className="flex flex-col gap-3 bg-bmcdark-800/40 p-5 rounded-2xl border border-white/5 shadow-sm">
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 text-center">Curve States Library</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+                    {PRESET_SLOTS.map(slot => (
+                      <div 
+                        key={slot.id} 
+                        onDoubleClick={() => {
+                            handleApplySlot(slot.id);
+                            const targetCurve = savedSlots[slot.id] || PRESET_SLOTS.find(s => s.id === slot.id)?.defaultCurve || PRESET_SLOTS[2].defaultCurve;
+                            handleApplyToAll(targetCurve);
+                        }}
+                        title="Double click to apply instantly!"
+                        className={`flex items-center rounded-xl overflow-hidden shadow-sm border transition-all cursor-pointer select-none ${activeSlotId === slot.id ? 'bg-bmcaccent/10 border-bmcaccent/50' : 'bg-bmcdark-900/80 border-white/5 hover:border-white/20 hover:shadow-md'}`}
+                      >
+                         <button 
+                           onClick={() => handleApplySlot(slot.id)}
+                           className={`flex-1 p-3 text-left font-bold transition-colors text-sm ${activeSlotId === slot.id ? 'text-bmcaccent' : 'text-slate-300 hover:text-white'}`}
+                         >
+                           {slot.label} {savedSlots[slot.id] && <span className="text-[9px] ml-1 opacity-70 border border-current px-1 py-0.5 rounded-sm">SAVED</span>}
+                         </button>
+                         <button 
+                           onClick={(e) => handleSaveToSlot(slot.id, e)}
+                           title={`Save current curve to ${slot.label}`}
+                           className="p-3 bg-bmcdark-800 text-slate-500 hover:bg-emerald-500 hover:text-white transition-colors border-l border-white/5"
+                         >
+                           <Save size={16} />
+                         </button>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <button 
+                     onClick={() => handleApplyToAll()}
+                     disabled={isSaving}
+                     className={`w-full border transition-all rounded-xl py-4 font-black uppercase tracking-widest text-sm shadow-xl
+                        ${isSaving 
+                          ? 'bg-bmcdark-700 text-slate-400 border-bmcdark-700 cursor-wait' 
+                          : 'bg-bmcaccent border-bmcaccent text-bmcdark-900 hover:bg-emerald-400 hover:border-emerald-400 hover:shadow-[0_0_20px_rgba(52,211,153,0.4)] hover:scale-[1.02] active:scale-[0.98]'
+                        }`}
+                  >
+                    {isSaving ? 'Syncing Curve Data...' : (activeZoneIds.length === 0 ? '⚡ Apply to All 7 Zones' : `⚡ Apply to ${activeZoneIds.length} Selected Zone(s)`)}
+                  </button>
+               </div>
              </div>
+             
            </div>
         </WeAiBlock>
       );
