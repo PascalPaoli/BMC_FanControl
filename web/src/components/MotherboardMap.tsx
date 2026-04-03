@@ -41,6 +41,11 @@ const THERMALS = [
   { label: 'B1', getVal: (t: Record<string, number>) => t['DIMMB1 Temp.'], x: 46, y: 44.5, scale: 'text-[11px] px-1.5 py-0.5', labelScale: 'text-[9px]' },
   { label: 'C1', getVal: (t: Record<string, number>) => t['DIMMC1 Temp.'], x: 46, y: 47.3, scale: 'text-[11px] px-1.5 py-0.5', labelScale: 'text-[9px]' },
   { label: 'D1', getVal: (t: Record<string, number>) => t['DIMMD1 Temp.'], x: 46, y: 50.1, scale: 'text-[11px] px-1.5 py-0.5', labelScale: 'text-[9px]' },
+  
+  { label: 'PCIE1', getVal: (t: Record<string, number>) => { const k = Object.keys(t).find(k => k.toUpperCase().includes('PCI') && k.includes('1')); return k ? t[k] : undefined; }, x: 45, y: 52.5, scale: 'px-2 py-1 border', labelScale: 'text-xs mr-1', valueScale: 'text-lg' },
+  { label: 'PCIE3', getVal: (t: Record<string, number>) => { const k = Object.keys(t).find(k => k.toUpperCase().includes('PCI') && k.includes('3')); return k ? t[k] : undefined; }, x: 45, y: 62.5, scale: 'px-2 py-1 border', labelScale: 'text-xs mr-1', valueScale: 'text-lg' },
+  { label: 'PCIE5', getVal: (t: Record<string, number>) => { const k = Object.keys(t).find(k => k.toUpperCase().includes('PCI') && (k.includes('5') || k.includes('6'))); return k ? t[k] : undefined; }, x: 45, y: 72.5, scale: 'px-2 py-1 border', labelScale: 'text-xs mr-1', valueScale: 'text-lg' },
+  { label: 'PCIE7', getVal: (t: Record<string, number>) => { const k = Object.keys(t).find(k => k.toUpperCase().includes('PCI') && k.includes('7')); return k ? t[k] : undefined; }, x: 8.5, y: 88.5, scale: 'text-[11px] px-1.5 py-0.5 border', labelScale: 'text-[9px] mr-1' },
 ];
 
 export default function MotherboardMap({ activeZoneIds, onSelectZone, fanSpeeds, thermals }: MotherboardMapProps) {
@@ -110,6 +115,7 @@ export default function MotherboardMap({ activeZoneIds, onSelectZone, fanSpeeds,
 
         {THERMALS.map((therm, idx) => {
           const val = therm.getVal(thermals);
+          if (val === undefined) return null;
           
           return (
             <div

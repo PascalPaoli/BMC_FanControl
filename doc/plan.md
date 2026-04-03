@@ -23,7 +23,7 @@ To stop scraping the heavy web JSON API, we will transition to IPMI (via `node-i
 
 ---
 
-### Phase 2: Independent Fan Zones Configuration
+### Phase 2: Independent Fan Zones Configuration (UI Completed)
 According to the manual you shared, there are 8 physical headers but they map to 7 control zones:
 - **Index 0 (Shared A)**: CPU_FAN & CPU_OPT
 - **Index 1**: CHA_FAN1
@@ -33,14 +33,15 @@ According to the manual you shared, there are 8 physical headers but they map to
 - **Index 5**: CHA_FAN5
 - **Index 6**: CHA_FAN6
 
-- [MODIFY] `server/src/bmcClient.ts`: Update `applyMasterCurve` to `applyZoneCurve(zoneId, curve)` so we no longer loop `for (let i = 0; i <= 6; i++)` to blast the same curve across all zones.
-- [MODIFY] `web/src/components/FanControl.tsx` (or similar): Replace the single global fan curve editor with a tabular/card layout allowing you to switch between the 7 discrete zones.
+**UI Status (Done):** The React frontend has been entirely rewritten. The dashboard elegantly displays the motherboard layout with perfectly mapped dynamic telemetry badges, and the UI logic filters out disabled BMC sensors. The Fan Curve editor layout correctly synchronizes height and grid layout scale.
+
+- [TODO] `server/src/bmcClient.ts`: Update `applyMasterCurve` to `applyZoneCurve(zoneId, curve)` so we no longer loop `for (let i = 0; i <= 6; i++)` to blast the same curve across all zones. The UI will send discrete zone targets.
 
 ---
 
 ### Phase 3: Native Socket Curve Control
-- [NEW] Introduce WebSockets to the Node Backend to push hardware updates directly to the React frontend instead of the React app spamming REST API polls.
-- [MODIFY] Map the exact 5-point curve setup the MegaRAC BMC uses so your React SVG editor perfectly matches the hardware's internal logic.
+- [TODO] Introduce WebSockets to the Node Backend to push hardware updates directly to the React frontend instead of the React app spamming REST API polls.
+- [TODO] Map the exact 5-point curve setup the MegaRAC BMC uses so your React SVG editor perfectly matches the hardware's internal logic.
 
 ## Open Questions
 
