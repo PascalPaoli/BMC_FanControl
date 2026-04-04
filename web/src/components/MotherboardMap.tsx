@@ -49,6 +49,24 @@ const THERMALS = [
 ];
 
 export default function MotherboardMap({ activeZoneIds, onSelectZone, fanSpeeds, thermals }: MotherboardMapProps) {
+  const [aliases, setAliases] = React.useState<Record<number, string>>({});
+  const [editingZoneId, setEditingZoneId] = React.useState<number | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem('bmc_fan_aliases');
+      if (saved) setAliases(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  const saveAlias = (id: number) => {
+    setEditingZoneId(null);
+    const newAliases = { ...aliases, [id]: editValue };
+    setAliases(newAliases);
+    localStorage.setItem('bmc_fan_aliases', JSON.stringify(newAliases));
+  };
+
   const getTempColor = (temp?: number) => {
     if (temp === undefined) return 'bg-gray-800/80 border-gray-600 text-gray-500';
     if (temp < 55) return 'bg-emerald-900/80 border-emerald-500/50 text-emerald-400';
@@ -104,9 +122,33 @@ export default function MotherboardMap({ activeZoneIds, onSelectZone, fanSpeeds,
                </div>
 
                <div className={`absolute ${zone.tooltipClass || (zone.y > 80 ? 'bottom-8' : 'top-8')} pointer-events-none flex flex-col items-center transition-opacity duration-200 ${isActive ? 'opacity-100 z-40' : 'opacity-0 group-hover:opacity-100 z-30'}`}>
-                 <div className="bg-bmcdark-900 border border-white/10 px-2 py-1 rounded shadow-xl whitespace-nowrap flex flex-col items-center">
-                    <span className="text-[9px] font-bold text-slate-300 uppercase leading-tight">{zone.label}</span>
-                    <span className="text-xs font-black text-green-500 leading-tight mt-0.5">{fanSpeeds[zone.label] !== undefined ? `${fanSpeeds[zone.label]} RPM` : '...'}</span>
+                 <div className="bg-bmcdark-900 border border-white/10 px-2 py-1 rounded shadow-xl whitespace-nowrap flex flex-col items-center pointer-events-auto">
+                    {editingZoneId === zone.id ? (
+                      <input 
+                        autoFocus
+                        className="bg-transparent border-b border-bmcaccent outline-none w-16 text-center text-[9px] font-bold text-bmcaccent uppercase leading-tight mb-0.5"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => saveAlias(zone.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span 
+                        className="text-[9px] font-bold text-slate-300 uppercase leading-tight cursor-text border-b border-transparent hover:border-slate-500" 
+                        title={`Hardware Port: ${zone.label}`}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setEditValue(aliases[zone.id] || zone.label);
+                          setEditingZoneId(zone.id);
+                        }}
+                      >
+                        {aliases[zone.id] || zone.label}
+                      </span>
+                    )}
+                    <span className="text-xs font-black text-green-500 leading-tight mt-0.5 pointer-events-none">{fanSpeeds[zone.label] !== undefined ? `${fanSpeeds[zone.label]} RPM` : '...'}</span>
                  </div>
                </div>
             </div>

@@ -97,6 +97,31 @@ export const getSensors = async () => {
   }
 }
 
+export const getZoneCurve = async (zoneId: number) => {
+  const { csrfToken: token, sessionCookies: cookie } = await authenticate();
+
+  try {
+      const res = await client.get('api/fanctrl/PWM', {
+        headers: { 'X-CSRFTOKEN': token, 'Cookie': cookie }
+      });
+      const zoneData = res.data[zoneId];
+      if (!zoneData || !zoneData.CurrentPWMdata) {
+          throw new Error("Zone curve data not found");
+      }
+      
+      const pts = zoneData.CurrentPWMdata;
+      return {
+          a: { temp: pts[0]?.Temp || 0, duty: pts[0]?.Duty || 20 },
+          b: { temp: pts[1]?.Temp || 20, duty: pts[1]?.Duty || 20 },
+          c: { temp: pts[2]?.Temp || 60, duty: pts[2]?.Duty || 60 },
+          d: { temp: pts[3]?.Temp || 80, duty: pts[3]?.Duty || 100 }
+      };
+  } catch (error: any) {
+      console.error(`Failed to fetch zone curve for zone ${zoneId}:`, error.message);
+      throw new Error(`Failed to fetch zone curve`);
+  }
+}
+
 export const applyZoneCurve = async (zoneId: number, curve: any, customUrl?: string) => {
   const { csrfToken: token, sessionCookies: cookie } = await authenticate();
   

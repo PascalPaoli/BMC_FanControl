@@ -2,7 +2,7 @@ import fastify from 'fastify';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
 import websocket from '@fastify/websocket';
-import { getSensors, applyMasterCurve, applyZoneCurve, logOutSafely } from './bmcClient.js';
+import { getSensors, applyMasterCurve, applyZoneCurve, getZoneCurve, logOutSafely } from './bmcClient.js';
 import { getOsMetrics } from './osMetrics.js';
 
 ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(signal => {
@@ -90,6 +90,17 @@ server.post('/api/fans/apply-zone-curve', async (request, reply) => {
     if (body.zoneId === undefined) throw new Error("zoneId is required");
     const result = await applyZoneCurve(body.zoneId, body.curve, body.url);
     return result;
+  } catch (err: any) {
+    server.log.error(err);
+    reply.status(500).send({ error: err.message });
+  }
+});
+
+server.get('/api/fans/zone-curve/:zoneId', async (request: any, reply) => {
+  try {
+    const { zoneId } = request.params;
+    const curve = await getZoneCurve(Number(zoneId));
+    return curve;
   } catch (err: any) {
     server.log.error(err);
     reply.status(500).send({ error: err.message });

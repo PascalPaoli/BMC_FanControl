@@ -383,17 +383,35 @@ function App() {
                 <div className="w-full aspect-square relative">
                    <MotherboardMap 
                   activeZoneIds={activeZoneIds} 
-                  onSelectZone={(id, isCtrl) => {
+                  onSelectZone={async (id, isCtrl) => {
                       if (id === 'all') {
                           setActiveZoneIds([]);
                       } else {
-                          setActiveZoneIds(prev => {
-                              if (isCtrl) {
-                                  if (prev.includes(id as number)) return prev.filter((z: number) => z !== id);
-                                  return [...prev, id as number];
+                          let newZones = [...activeZoneIds];
+                          if (isCtrl) {
+                              if (newZones.includes(id as number)) newZones = newZones.filter(z => z !== id);
+                              else newZones.push(id as number);
+                          } else {
+                              newZones = [id as number];
+                          }
+                          setActiveZoneIds(newZones);
+                          
+                          if (newZones.length === 1) {
+                              const targetZone = newZones[0];
+                              try {
+                                  setIsSaving(true);
+                                  const res = await fetch(`http://localhost:3001/api/fans/zone-curve/${targetZone}`);
+                                  if (res.ok) {
+                                      const curve = await res.json();
+                                      setZoneCurves(prev => ({ ...prev, [targetZone.toString()]: curve }));
+                                      setActiveSlotId('');
+                                  }
+                              } catch(e) {
+                                  console.error("Failed to load hardware curve for zone", targetZone);
+                              } finally {
+                                  setIsSaving(false);
                               }
-                              return [id as number];
-                          });
+                          }
                       }
                   }}
                   fanSpeeds={fans.reduce((acc, sensor) => { acc[sensor.name] = sensor.reading; return acc; }, {} as Record<string, number>)}
